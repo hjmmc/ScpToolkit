@@ -1,4 +1,5 @@
-﻿using System;
+﻿using ScpControl.Shared.Utilities;
+using System;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Reflection;
@@ -21,16 +22,16 @@ namespace ScpControl.Shared.Core
         #region Private fields
 
         private static readonly PropertyInfo[] Ds3Buttons =
-            typeof (Ds3Button).GetProperties(BindingFlags.Public | BindingFlags.Static);
+            typeof(Ds3Button).GetProperties(BindingFlags.Public | BindingFlags.Static);
 
         private static readonly PropertyInfo[] Ds3Axes =
-            typeof (Ds3Axis).GetProperties(BindingFlags.Public | BindingFlags.Static);
+            typeof(Ds3Axis).GetProperties(BindingFlags.Public | BindingFlags.Static);
 
         private static readonly PropertyInfo[] Ds4Buttons =
-            typeof (Ds4Button).GetProperties(BindingFlags.Public | BindingFlags.Static);
+            typeof(Ds4Button).GetProperties(BindingFlags.Public | BindingFlags.Static);
 
         private static readonly PropertyInfo[] Ds4Axes =
-            typeof (Ds4Axis).GetProperties(BindingFlags.Public | BindingFlags.Static);
+            typeof(Ds4Axis).GetProperties(BindingFlags.Public | BindingFlags.Static);
 
         #endregion
 
@@ -76,7 +77,7 @@ namespace ScpControl.Shared.Core
 
         public byte SetBatteryStatus(DsBattery battery)
         {
-            return RawBytes[(int) DsOffset.Battery] = (byte) battery;
+            return RawBytes[(int)DsOffset.Battery] = (byte)battery;
         }
 
         public void ZeroShoulderButtonsState()
@@ -125,37 +126,37 @@ namespace ScpControl.Shared.Core
             set
             {
                 if (value != null)
-                    Buffer.BlockCopy(value.GetAddressBytes(), 0, RawBytes, 90, 6);
+                    Buffer.BlockCopy(value.GetAddressBytes(), 0, RawBytes, RawBytes.Length - 6, 6);
             }
         }
 
         public uint PacketCounter
         {
-            get { return (uint) ((RawBytes[7] << 24) | (RawBytes[6] << 16) | (RawBytes[5] << 8) | (RawBytes[4] << 0)); }
+            get { return (uint)((RawBytes[7] << 24) | (RawBytes[6] << 16) | (RawBytes[5] << 8) | (RawBytes[4] << 0)); }
             set
             {
-                RawBytes[4] = (byte) (value >> 0 & 0xFF);
-                RawBytes[5] = (byte) (value >> 8 & 0xFF);
-                RawBytes[6] = (byte) (value >> 16 & 0xFF);
-                RawBytes[7] = (byte) (value >> 24 & 0xFF);
+                RawBytes[4] = (byte)(value >> 0 & 0xFF);
+                RawBytes[5] = (byte)(value >> 8 & 0xFF);
+                RawBytes[6] = (byte)(value >> 16 & 0xFF);
+                RawBytes[7] = (byte)(value >> 24 & 0xFF);
             }
         }
 
         public DsModel Model
         {
-            get { return (DsModel) RawBytes[(int) DsOffset.Model]; }
-            set { RawBytes[(int) DsOffset.Model] = (byte) value; }
+            get { return (DsModel)RawBytes[(int)DsOffset.Model]; }
+            set { RawBytes[(int)DsOffset.Model] = (byte)value; }
         }
 
         public DsPadId PadId
         {
-            get { return (DsPadId) RawBytes[(int) DsOffset.Pad]; }
-            set { RawBytes[(int) DsOffset.Pad] = (byte) value; }
+            get { return (DsPadId)RawBytes[(int)DsOffset.Pad]; }
+            set { RawBytes[(int)DsOffset.Pad] = (byte)value; }
         }
 
         public DsState PadState
         {
-            get { return (DsState) RawBytes[(int) DsOffset.State]; }
+            get { return (DsState)RawBytes[(int)DsOffset.State]; }
             set { RawBytes[(int)DsOffset.State] = (byte)value; }
         }
 
@@ -167,8 +168,8 @@ namespace ScpControl.Shared.Core
 
         public DsConnection ConnectionType
         {
-            get { return (DsConnection) RawBytes[(int) DsOffset.Connection]; }
-            set { RawBytes[(int) DsOffset.Connection] = (byte) value; }
+            get { return (DsConnection)RawBytes[(int)DsOffset.Connection]; }
+            set { RawBytes[(int)DsOffset.Connection] = (byte)value; }
         }
 
         public byte BatteryStatus
@@ -186,8 +187,8 @@ namespace ScpControl.Shared.Core
                     case DsModel.DS3:
                         if (
                             Ds3Buttons.Any(
-                                button => this[button.GetValue(typeof (Ds3Button), null) as IDsButton].IsPressed)
-                            || Ds3Axes.Any(axis => this[axis.GetValue(typeof (Ds3Axis), null) as IDsAxis].IsEngaged))
+                                button => this[button.GetValue(typeof(Ds3Button), null) as IDsButton].IsPressed)
+                            || Ds3Axes.Any(axis => this[axis.GetValue(typeof(Ds3Axis), null) as IDsAxis].IsEngaged))
                         {
                             return true;
                         }
@@ -195,8 +196,8 @@ namespace ScpControl.Shared.Core
                     case DsModel.DS4:
                         if (
                             Ds4Buttons.Any(
-                                button => this[button.GetValue(typeof (Ds3Button), null) as IDsButton].IsPressed)
-                            || Ds4Axes.Any(axis => this[axis.GetValue(typeof (Ds4Axis), null) as IDsAxis].IsEngaged))
+                                button => this[button.GetValue(typeof(Ds3Button), null) as IDsButton].IsPressed)
+                            || Ds4Axes.Any(axis => this[axis.GetValue(typeof(Ds4Axis), null) as IDsAxis].IsEngaged))
                         {
                             return true;
                         }
@@ -209,24 +210,110 @@ namespace ScpControl.Shared.Core
             }
         }
 
-        /// <summary>
-        ///     Gets the motion data from the DualShock accelerometer sensor.
-        /// </summary>
-        /// <remarks>https://github.com/ehd/node-ds4/blob/master/index.js</remarks>
-        public DsAccelerometer Motion
+        public long Timestamp //in us
         {
             get
             {
+                int lastUsedIdx = RawBytes.Length - 6 - 2; //model and index use 2 more
+                int currIdx = lastUsedIdx;
+                ulong retVal = 0;
+                switch (Model)
+                {
+                    case DsModel.DS3: //have enough free space in the 96-6 byte report (only 8+49 used) to just store it as 8 bytes
+                        {
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 56;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 48;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 40;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 32;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 24;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 16;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 8;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 0;
+                        } break;
+                    case DsModel.DS4: //only have 4 bytes left after pad data (76+8 used) so reuse the 2 original timestamp bytes as LSB
+                        {
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 40;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 32;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 24;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 16;
+
+                            currIdx = (10 + 8) + 2; //just after the original timestamp
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 8;
+                            retVal |= ((ulong)RawBytes[--currIdx]) << 0;
+                        } break;
+                }
+
+                return (long)retVal;
+            }
+            set
+            {
+                ulong val = (ulong)value;
+                int lastUsedIdx = RawBytes.Length - 6 - 2;
+                int currIdx = lastUsedIdx;
                 switch (Model)
                 {
                     case DsModel.DS3:
-                        throw new NotImplementedException("DualShock 3 accelerometer readout not implemented yet.");
+                        {
+                            RawBytes[--currIdx] = (byte)(val >> 56);
+                            RawBytes[--currIdx] = (byte)(val >> 48);
+                            RawBytes[--currIdx] = (byte)(val >> 40);
+                            RawBytes[--currIdx] = (byte)(val >> 32);
+                            RawBytes[--currIdx] = (byte)(val >> 24);
+                            RawBytes[--currIdx] = (byte)(val >> 16);
+                            RawBytes[--currIdx] = (byte)(val >> 8);
+                            RawBytes[--currIdx] = (byte)(val >> 0);
+                        } break;
                     case DsModel.DS4:
+                        {
+                            RawBytes[--currIdx] = (byte)(val >> 40);
+                            RawBytes[--currIdx] = (byte)(val >> 32);
+                            RawBytes[--currIdx] = (byte)(val >> 24);
+                            RawBytes[--currIdx] = (byte)(val >> 16);
+
+                            currIdx = (10 + 8) + 2;
+                            RawBytes[--currIdx] = (byte)(val >> 8);
+                            RawBytes[--currIdx] = (byte)(val >> 0);
+                        } break;
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Gets the linear acceleration data from the DualShock accelerometer sensor.
+        /// </summary>
+        /// <remarks>
+        ///			http://eleccelerator.com/wiki/index.php?title=DualShock_3 (off by one and mistaken endianness)
+        ///			https://github.com/RPCS3/rpcs3/blob/master/rpcs3/ds4_pad_handler.cpp
+        ///	</remarks>
+        public DsAccelerometer Accelerometer
+        {
+            get
+            {
+                short intX, intY, intZ;
+
+                switch (Model)
+                {
+                    case DsModel.DS3:
+                        intX = (short)(1023 - (((ushort)RawBytes[41 + 8] << 8) | (ushort)RawBytes[42 + 8])); //negated
+                        intZ = (short)(((ushort)RawBytes[43 + 8] << 8) | (ushort)RawBytes[44 + 8]);
+                        intY = (short)(((ushort)RawBytes[45 + 8] << 8) | (ushort)RawBytes[46 + 8]); //Y is gravity, which appears here
+
                         return new DsAccelerometer
                         {
-                            Y = (short) ((RawBytes[22] << 8) | RawBytes[21]),
-                            X = (short) -((RawBytes[24] << 8) | RawBytes[23]),
-                            Z = (short) -((RawBytes[26] << 8) | RawBytes[25])
+                            X = (float)(intX - 512) / 113.0f,
+                            Y = (float)(intY - 512) / 113.0f,
+                            Z = (float)(intZ - 512) / 113.0f
+                        };
+                    case DsModel.DS4:
+                        intX = (short)-(((ushort)RawBytes[20 + 8] << 8) | (ushort)RawBytes[19 + 8]);
+                        intY = (short)-(((ushort)RawBytes[22 + 8] << 8) | (ushort)RawBytes[21 + 8]);
+                        intZ = (short)-(((ushort)RawBytes[24 + 8] << 8) | (ushort)RawBytes[23 + 8]);
+
+                        return new DsAccelerometer
+                        {
+                            X = (float)(intX) / 8192.0f,
+                            Y = (float)(intY) / 8192.0f,
+                            Z = (float)(intZ) / 8192.0f
                         };
                 }
 
@@ -235,23 +322,44 @@ namespace ScpControl.Shared.Core
         }
 
         /// <summary>
-        ///     Gets the orientation data from the DualShock gyroscope sensor.
+        ///     Gets the angular velocity data from the DualShock gyroscope sensor.
         /// </summary>
-        /// <remarks>https://github.com/ehd/node-ds4/blob/master/index.js</remarks>
-        public DsGyroscope Orientation
+        /// <remarks>
+        ///			http://eleccelerator.com/wiki/index.php?title=DualShock_3 (off by one and mistaken endianness) 
+        ///			https://github.com/RPCS3/rpcs3/blob/master/rpcs3/ds4_pad_handler.cpp
+        ///	</remarks>
+        public DsGyroscope Gyroscope
         {
             get
             {
+                short intPitch, intYaw, intRoll;
+
                 switch (Model)
                 {
                     case DsModel.DS3:
-                        throw new NotImplementedException("DualShock 3 gyroscope readout not implemented yet.");
-                    case DsModel.DS4:
+                        intYaw = (short)(((ushort)RawBytes[47 + 8] << 8) | (ushort)RawBytes[48 + 8]);
+
                         return new DsGyroscope
                         {
-                            Roll = (short) -((RawBytes[28] << 8) | RawBytes[27]),
-                            Yaw = (short) ((RawBytes[30] << 8) | RawBytes[29]),
-                            Pitch = (short) ((RawBytes[32] << 8) | RawBytes[31])
+                            //Disable DS3 Gyroscope
+
+                            //Pitch = Single.NaN,
+                            //Yaw = (float)(intYaw - 512) * (90.0f / 123.0f),
+                            //Roll = Single.NaN
+                            Pitch = 0,
+                            Yaw = 0,
+                            Roll = 0
+                        };
+                    case DsModel.DS4:
+                        intPitch = (short)(((ushort)RawBytes[14 + 8] << 8) | (ushort)RawBytes[13 + 8]);
+                        intYaw = (short)-(((ushort)RawBytes[16 + 8] << 8) | (ushort)RawBytes[15 + 8]);
+                        intRoll = (short)-(((ushort)RawBytes[18 + 8] << 8) | (ushort)RawBytes[17 + 8]);
+
+                        return new DsGyroscope
+                        {
+                            Pitch = (float)(intPitch) / 16.0f,
+                            Yaw = (float)(intYaw) / 16.0f,
+                            Roll = (float)(intRoll) / 16.0f
                         };
                 }
 
@@ -321,7 +429,7 @@ namespace ScpControl.Shared.Core
                 if (button is Ds3Button && Model == DsModel.DS3)
                 {
                     var buttons =
-                        (uint) ((RawBytes[10] << 0) | (RawBytes[11] << 8) | (RawBytes[12] << 16) | (RawBytes[13] << 24));
+                        (uint)((RawBytes[10] << 0) | (RawBytes[11] << 8) | (RawBytes[12] << 16) | (RawBytes[13] << 24));
 
                     _currentDsButtonState.IsPressed = !button.Equals(Ds3Button.None) &&
                                                       (buttons & button.Offset) == button.Offset;
@@ -335,7 +443,7 @@ namespace ScpControl.Shared.Core
                 if (button is Ds4Button && Model == DsModel.DS4)
                 {
                     var buttons =
-                        (uint) ((RawBytes[13] << 0) | (RawBytes[14] << 8) | (RawBytes[15] << 16));
+                        (uint)((RawBytes[13] << 0) | (RawBytes[14] << 8) | (RawBytes[15] << 16));
 
                     _currentDsButtonState.IsPressed = !button.Equals(Ds4Button.None) &&
                                                       (buttons & button.Offset) == button.Offset;

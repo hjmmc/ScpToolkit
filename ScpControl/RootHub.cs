@@ -91,6 +91,8 @@ namespace ScpControl
         // server to broadcast native byte stream
         private ReactiveListener _rxFeedServer;
         private bool _serviceStarted;
+        // udp server to broadcast pad data to clients
+        private ScpUdpServer _udpServer;
 
         #endregion
 
@@ -233,6 +235,7 @@ namespace ScpControl
             // subscribe to incoming HID reports
             _bthHub.Report += OnHidReportReceived;
             _usbHub.Report += OnHidReportReceived;
+            _udpServer = new ScpUdpServer(GetPadDetail);
         }
 
         public RootHub(IContainer container)
@@ -368,6 +371,12 @@ namespace ScpControl
                 _rootHubServiceHost.Open();
 
                 _serviceStarted = true;
+                try { _udpServer.Start(26760); }
+                catch (SocketException ex)
+                {
+                    Log.FatalFormat("Couldn't start UDP server: {0}", ex);
+                    return false;
+                }
             }
 
             try
@@ -408,6 +417,8 @@ namespace ScpControl
 
             if (_rxFeedServer != null)
                 _rxFeedServer.Dispose();
+
+            _udpServer.Stop();
 
             _scpBus.Stop();
             _usbHub.Stop();
@@ -622,6 +633,9 @@ namespace ScpControl
                     _scpBus.Unplug(_scpBus.IndexToSerial((byte)e.PadId));
                 }
             }
+
+            //Propagate report through UDP server
+            _udpServer.NewReportIncoming(e);
 
             // skip broadcast if native feed is disabled
             if (GlobalConfiguration.Instance.DisableNative)
